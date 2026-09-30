@@ -1,0 +1,13 @@
+Busca do menor horizonte para 'situacao3_ordem_inversa' (T = 0, 1, 2, ...)
+
+  T  variaveis  clausulas  resultado
+  0         54      11062  UNSATISFIABLE
+  1        192      26345  UNSATISFIABLE
+  2        330      41628  UNSATISFIABLE
+  3        468      56911  UNSATISFIABLE
+  4        606      72194  UNSATISFIABLE
+  5        744      87477  UNSATISFIABLE
+  6        882     102760  UNSATISFIABLE
+  7       1020     118043  SATISFIABLE
+
+Menor T que satisfaz: 7  =>  plano de comprimento minimo (no maximo 7 acoes).

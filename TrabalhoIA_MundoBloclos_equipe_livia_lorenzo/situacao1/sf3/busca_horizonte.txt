@@ -1,0 +1,8 @@
+Busca do menor horizonte para 'situacao1_sf3' (T = 0, 1, 2, ...)
+
+  T  variaveis  clausulas  resultado
+  0         53      11059  UNSATISFIABLE
+  1        190      26339  UNSATISFIABLE
+  2        327      41619  SATISFIABLE
+
+Menor T que satisfaz: 2  =>  plano de comprimento minimo (no maximo 2 acoes).

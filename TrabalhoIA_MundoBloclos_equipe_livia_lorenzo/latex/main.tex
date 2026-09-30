@@ -1,0 +1,260 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{hyperref}
+\geometry{margin=2.5cm}
+\lstset{basicstyle=\ttfamily\small,columns=fullflexible,breaklines=true,frame=single}
+\newcommand{\at}{\mathit{at}}
+\newcommand{\lev}{\mathit{lev}}
+\newcommand{\clr}{\mathit{clr}}
+\newcommand{\on}{\mathit{on}}
+\newcommand{\mv}{\mathit{move}}
+
+\title{Trabalho 1: Mundo dos Blocos de Tamanho Vari\'avel via SAT Solver\\
+\large Fundamentos de Intelig\^encia Artificial --- Prof.\ Edjard Mota}
+\author{Equipe Livia\_Lorenzo --- Livia Karolina Gomes do Nascimento, Lorenzo Augusto da Costa Freitas}
+\date{Outubro de 2026}
+
+\renewcommand{\contentsname}{Sumário}
+\renewcommand{\figurename}{Figura}
+\renewcommand{\tablename}{Tabela}
+\begin{document}
+\maketitle
+\tableofcontents
+
+\section{Introdu\c{c}\~ao ao Problema}
+No Mundo dos Blocos cl\'assico todos os blocos t\^em o mesmo tamanho. Aqui os blocos t\^em comprimentos diferentes, ficam em qualquer posi\c{c}\~ao horizontal de uma mesa com espa\c{c}os vazios, podem ficar em ponte sobre dois blocos e s\'o permanecem de p\'e se tiverem apoio suficiente. O objetivo \'e gerar um plano (uma sequ\^encia de a\c{c}\~oes) que leva um estado inicial a um estado meta, descrevendo o dom\'inio em l\'ogica de primeira ordem (LPO), traduzindo para l\'ogica proposicional (CNF) e resolvendo com o miniSAT.
+
+A a\c{c}\~ao de movimento \'e \emph{qualitativa}: em vez de ``mover para o n\'ivel 2, posi\c{c}\~ao 3'', dizemos ``mover o bloco $d$ para cima do bloco $c$, come\c{c}ando no ponto 0''.
+
+\section{Descri\c{c}\~ao Formal do Mundo dos Blocos de Tamanho Variado}
+\subsection{Blocos, mesa, pontos e slots}
+$B=\{a,b,c,d\}$ com comprimentos $\ell(a)=\ell(b)=1$, $\ell(c)=2$, $\ell(d)=3$. A mesa $T$ tem os pontos $X=\{0,\dots,6\}$ e os \emph{slots} $s_i=[i,i+1]$, $i\in\{0,\dots,5\}$: s\~ao \textbf{6 slots}, n\~ao 7. Um bloco $b$ que come\c{c}a no ponto $p$ cobre os slots $p,\dots,p+\ell(b)-1$, e as posi\c{c}\~oes v\'alidas s\~ao $p\in\{0,\dots,6-\ell(b)\}$. Os n\'iveis v\~ao de 0 (mesa) a 3.
+
+\subsection{Predicados}
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Predicado & Tipo & Significado\\
+\midrule
+$\at(b,p,t)$ & estado & $b$ come\c{c}a no ponto $p$ em $t$\\
+$\lev(b,l,t)$ & estado & $b$ est\'a no n\'ivel $l$ em $t$\\
+$\clr(b,t)$ & estado & nada est\'a sobre $b$ em $t$\\
+$\on(b,y,t)$ & derivado & $b$ apoiado em $y\in B\cup\{T\}$\\
+$\mathit{stable}(b,p,l,t)$ & derivado & apoio suficiente\\
+$\mv(b,y,p,t)$ & a\c{c}\~ao & mover $b$ para cima de $y$, come\c{c}ando em $p$\\
+\bottomrule
+\end{tabular}
+\end{center}
+A rela\c{c}\~ao $\on$ \'e derivada, n\~ao codificada:
+\[
+\on(b,y,t)\leftrightarrow \exists p,p_y,l.\ \at(b,p,t)\wedge\at(y,p_y,t)\wedge\lev(b,l,t)\wedge\lev(y,l-1,t)\wedge \mathit{overlap}(b,p,y,p_y).
+\]
+Um bloco pode ter v\'arios apoios (ponte): $\on(d,a,t)\wedge\on(d,b,t)$.
+
+\subsection{Regra de estabilidade}
+\[
+\mathit{stable}(b,p,l,t)\leftrightarrow \#\{s\in[p,p+\ell(b)-1] : \exists b'\neq b,\ \mathit{cov}(b',s,l-1,t)\}\ \ge\ \lceil \ell(b)/2\rceil .
+\]
+Assim $d$ pode ficar em ponte sobre dois blocos de comprimento 1 separados por um vazio, mas n\~ao pode ficar apoiado em um s\'o slot.
+
+\subsection{A\c{c}\~ao $\mv(b,y,p,t)$: pr\'e-condi\c{c}\~oes e efeitos}
+\textbf{Pr\'e-condi\c{c}\~oes:} (1) $\clr(b,t)$; (2) se $y$ \'e bloco, o span de $b$ em $p$ sobrep\~oe o de $y$; (3) o destino difere da posi\c{c}\~ao atual; (4) os slots ocupados por $b$ no n\'ivel-alvo est\~ao livres; (5) $\mathit{stable}(b,p,\text{n\'ivel-alvo})$; (6) n\'ivel-alvo $\le 3$.
+
+\textbf{Efeitos (adds e deletes):}
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Elemento & Add & Delete\\
+\midrule
+$\at$ & $\at(b,p)$ & $\at(b,p_{\text{antigo}})$\\
+$\lev$ & $\lev(b,\lev(y)+1)$ (ou $\lev(b,0)$ se $y=T$) & $\lev(b,l_{\text{antigo}})$\\
+$\clr$ & $\clr(z)$ para o bloco $z$ que ficou sem nada em cima & $\clr(y)$, se $y$ \'e bloco\\
+$\on$ (derivado) & apoios novos de $b$ & apoios antigos de $b$\\
+\bottomrule
+\end{tabular}
+\end{center}
+Todos os demais blocos permanecem inalterados (frame axioms).
+
+\subsection{Ajuste em rela\c{c}\~ao ao manual}
+O manual exige $\clr(y,t)$, o topo de $y$ \emph{inteiramente} livre. Testamos essa regra: com ela, os estados $S_{f1}$, $S_{f2}$ (Situa\c{c}\~ao 1), $S_5$ (Situa\c{c}\~ao 2) e $S_7$ (Situa\c{c}\~ao 3) ficam inalcan\c{c}\'aveis, pois neles dois blocos ficam lado a lado sobre o mesmo bloco e o segundo nunca consegue subir. O miniSAT respondeu UNSATISFIABLE para todo $T\le 12$. A pr\'e-condi\c{c}\~ao foi trocada por ``os slots do topo de $y$ que $b$ ocupar\'a est\~ao livres'', que \'e a pr\'e-condi\c{c}\~ao (4).
+
+\subsection{Ordem parcial}
+Escrevemos $\varphi_1\prec_P\varphi_2$ para ``$\varphi_1$ deve ter sido atingida antes (ou junto) de $\varphi_2$ valer''. Cada $\varphi$ \'e um par (bloco, ponto, n\'ivel). Para todo $t$:
+\[
+\neg\varphi_2(t)\ \vee\ \varphi_1(0)\vee\varphi_1(1)\vee\dots\vee\varphi_1(t).
+\]
+
+\section{Codifica\c{c}\~ao CNF}
+\subsection{Vari\'aveis proposicionais}
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Vari\'avel & \'Indices\\
+\midrule
+$\at(b,p,t)$ & $b\in B$, $p\in[0,6-\ell(b)]$, $t\in[0,T]$\\
+$\lev(b,l,t)$ & $b\in B$, $l\in[0,3]$, $t\in[0,T]$\\
+$\clr(b,t)$ & $b\in B$, $t\in[0,T]$\\
+$\mv(b,y,p,t)$ & $y\in B\cup\{T\}$, $y\neq b$, $t\in[0,T-1]$\\
+$\mathit{acima}(x,y,t)$ & auxiliar: $x$ imediatamente acima de $y$\\
+$\mathit{ord}_k(b,p,l,t)$ & auxiliar da ordem parcial\\
+\bottomrule
+\end{tabular}
+\end{center}
+A rela\c{c}\~ao $\on$ \emph{n\~ao} vira vari\'avel.
+
+\subsection{Grupos de cl\'ausulas}
+\begin{enumerate}
+\item \textbf{Estado inicial:} cl\'ausulas unit\'arias em $t=0$.
+\item \textbf{Meta:} cl\'ausulas unit\'arias em $t=T$.
+\item \textbf{Unicidade de posi\c{c}\~ao e n\'ivel:} $\bigvee_p \at(b,p,t)$ e $\neg\at(b,p_1,t)\vee\neg\at(b,p_2,t)$; an\'alogo para $\lev$.
+\item \textbf{Exclus\~ao horizontal:} $\neg\at(b_1,p_1,t)\vee\neg\at(b_2,p_2,t)\vee\neg\lev(b_1,l,t)\vee\neg\lev(b_2,l,t)$ se os spans se sobrep\~oem.
+\item \textbf{Estabilidade:} para cada combina\c{c}\~ao de posi\c{c}\~oes dos outros blocos no n\'ivel $l-1$ que d\'a menos de $\lceil\ell(b)/2\rceil$ slots de apoio, a combina\c{c}\~ao \'e proibida.
+\item \textbf{Clear:} $\mathit{acima}(x,y,t)$ vale sse $x$ est\'a no n\'ivel $\lev(y)+1$ com span sobreposto; $\clr(y,t)\leftrightarrow\neg\bigvee_x\mathit{acima}(x,y,t)$.
+\item \textbf{Pr\'e-condi\c{c}\~oes e efeitos de $\mv$:} cl\'ausulas $\neg\mv(b,y,p,t)\vee(\text{condi\c{c}\~ao})$. A pr\'e-condi\c{c}\~ao (4) e o efeito sobre $\clr(y)$ ficam garantidos pelos grupos 4, 5 e 6 no estado $t+1$.
+\item \textbf{Frame axioms:} $\neg\at(b,p,t)\vee\at(b,p,t+1)\vee(\text{$b$ foi movido em }t)$; idem para $\lev$.
+\item \textbf{No m\'aximo uma a\c{c}\~ao por passo.} N\~ao exigimos ``pelo menos uma'', ent\~ao um plano de $k$ a\c{c}\~oes vale para todo $T\ge k$.
+\item \textbf{Ordem parcial (opcional).}
+\end{enumerate}
+
+\section{Exemplos dos Tr\^es Cen\'arios Codificados}
+Formato: bloco $:(p,l)$ (ponto inicial, n\'ivel).
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Cen\'ario & Estado inicial & Meta\\
+\midrule
+Sit.\ 1 ($S_{f4}$) & $c{:}(0,0)\ a{:}(3,0)\ b{:}(5,0)\ d{:}(3,1)$ & $c{:}(0,0)\ a{:}(0,1)\ d{:}(2,0)\ b{:}(5,0)$\\
+Sit.\ 1 ($S_{f1}$) & idem & $d{:}(3,0)\ a{:}(4,1)\ b{:}(5,1)\ c{:}(4,2)$\\
+Sit.\ 1 ($S_{f2}$) & idem & $d{:}(3,0)\ c{:}(4,1)\ a{:}(4,2)\ b{:}(5,2)$\\
+Sit.\ 1 ($S_{f3}$) & idem & $c{:}(0,0)\ a{:}(2,0)\ d{:}(0,1)\ b{:}(5,0)$\\
+Sit.\ 2 ($S_5$) & $c{:}(0,0)\ a{:}(0,1)\ b{:}(1,1)\ d{:}(3,0)$ & $d{:}(3,0)\ c{:}(4,1)\ a{:}(4,2)\ b{:}(5,2)$\\
+Sit.\ 3 ($S_7$) & $c{:}(0,0)\ a{:}(3,0)\ b{:}(5,0)\ d{:}(3,1)$ & $c{:}(0,0)\ a{:}(0,1)\ b{:}(1,1)\ d{:}(3,0)$\\
+\bottomrule
+\end{tabular}
+\end{center}
+Na Situa\c{c}\~ao 3 a ordem parcial usada \'e $(a,0,1)\prec_P(b,1,1)$.
+
+Estado inicial da Situa\c{c}\~ao 1 ($d$ em ponte sobre $a$ e $b$; o slot 4 est\'a vazio sob $d$):
+\begin{lstlisting}
+   |.|.|.|d|d|d|
+   |c|c|.|a|.|b|
+   slots: 0 1 2 3 4 5
+\end{lstlisting}
+Em $S_0$: $\on(c,T)$, $\on(a,T)$, $\on(b,T)$, $\on(d,a)\wedge\on(d,b)$.
+
+\section{Mapeamento: Descri\c{c}\~ao Formal $\to$ C\'odigo}
+\begin{center}
+\small
+\begin{tabular}{ll}
+\toprule
+Regra formal & C\'odigo (\texttt{bw2cnf\_var.py})\\
+\midrule
+Blocos e comprimentos & \texttt{BLOCKS = \{'a':1,'b':1,'c':2,'d':3\}}\\
+Pontos do eixo & \texttt{MAX\_POINT = 6}\\
+Posi\c{c}\~oes v\'alidas & \texttt{valid\_positions(L)}\\
+Slots cobertos & \texttt{span(b, p)}\\
+Sobreposi\c{c}\~ao de span & \texttt{spans\_overlap(b1,p1,b2,p2)}\\
+Apoio m\'inimo $\lceil\ell/2\rceil$ & \texttt{min\_apoio(b)}\\
+$\at,\lev,\clr,\mv$ & dicion\'arios \texttt{at}, \texttt{lev}, \texttt{clr}, \texttt{mv}\\
+Estado inicial / meta & blocos \texttt{3.1}, \texttt{3.2}\\
+Unicidade & bloco \texttt{3.3 (A),(B)}\\
+Exclus\~ao horizontal & bloco \texttt{3.3 (C)}\\
+Estabilidade & bloco \texttt{3.3 (D)}\\
+Clear & bloco \texttt{3.3 (E)} (vari\'avel \texttt{acima})\\
+Pr\'e-condi\c{c}\~oes e efeitos de $\mv$ & bloco \texttt{3.4 (G)}\\
+Frame axioms & bloco \texttt{3.5}\\
+Uma a\c{c}\~ao por passo & bloco \texttt{3.6}\\
+Ordem parcial & bloco \texttt{3.7} (campo \texttt{order})\\
+Rela\c{c}\~ao $\on$ (derivada) & \texttt{interpretar.py}, \texttt{derivar\_on}\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Execu\c{c}\~ao Passo a Passo}
+\begin{enumerate}
+\item Instalar: \texttt{sudo apt install minisat} (Linux/WSL) ou \texttt{brew install minisat} (macOS).
+\item Gerar o CNF e o mapa:
+\begin{lstlisting}
+python3 bw2cnf_var.py situacao1 --horizon 4 --saida situacao1
+\end{lstlisting}
+Sa\'ida: \texttt{Gerado: N variaveis, M clausulas}, e os arquivos \texttt{trab01\_blocos2SAT.cnf} e \texttt{trab01\_blocos2SAT.map}.
+\item Executar o miniSAT:
+\begin{lstlisting}
+minisat situacao1/trab01_blocos2SAT.cnf situacao1/resultado1.txt
+\end{lstlisting}
+\item Interpretar:
+\begin{lstlisting}
+python3 interpretar.py situacao1/resultado1.txt --verbose
+\end{lstlisting}
+\item Para todos os cen\'arios, procurando o menor $T$: \texttt{python3 rodar.py}.
+\end{enumerate}
+Resultados (menor $T$ SATISFIABLE; todos os $T$ menores deram UNSATISFIABLE):
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+Cen\'ario & $T$ m\'in. & Vari\'aveis & Cl\'ausulas\\
+\midrule
+Sit.\ 1, $S_0\to S_{f4}$ & 4 & 601 & 72179\\
+Sit.\ 1, $S_0\to S_{f1}$ & 8 & 1149 & 133299\\
+Sit.\ 1, $S_0\to S_{f2}$ & 9 & 1286 & 148579\\
+Sit.\ 1, $S_0\to S_{f3}$ & 2 & 327 & 41619\\
+Sit.\ 2, $S_0\to S_5$ & 5 & 738 & 87459\\
+Sit.\ 3, $S_0\to S_7$ ($a\prec b$) & 6 & 882 & 102760\\
+Sit.\ 3, $S_0\to S_7$ (sem ordem) & 6 & 875 & 102739\\
+Sit.\ 3, $S_0\to S_7$ ($b\prec a$) & 7 & 1020 & 118043\\
+\bottomrule
+\end{tabular}
+\end{center}
+A ordem $b\prec a$ alonga o plano em uma a\c{c}\~ao, o que mostra que a restri\c{c}\~ao de ordem parcial age de fato.
+
+\subsection{Planos encontrados}
+\begin{center}
+\small
+\begin{tabular}{lp{10cm}}
+\toprule
+Cen\'ario & Plano\\
+\midrule
+Sit.\ 1 $\to S_{f4}$ & $\mv(d,c,0)$; $\mv(a,b,5)$; $\mv(d,T,2)$; $\mv(a,c,0)$\\
+Sit.\ 1 $\to S_{f3}$ & $\mv(d,c,0)$; $\mv(a,T,2)$\\
+Sit.\ 1 $\to S_{f1}$ & $\mv(d,c,0)$; $\mv(a,T,2)$; $\mv(d,c,1)$; $\mv(b,c,0)$; $\mv(d,T,3)$; $\mv(b,d,5)$; $\mv(c,b,4)$; $\mv(a,d,4)$\\
+Sit.\ 1 $\to S_{f2}$ & $\mv(c,T,1)$; $\mv(d,c,0)$; $\mv(a,T,0)$; $\mv(d,c,1)$; $\mv(b,a,0)$; $\mv(d,T,3)$; $\mv(c,d,4)$; $\mv(b,c,5)$; $\mv(a,c,4)$\\
+Sit.\ 2 $\to S_5$ & $\mv(a,T,2)$; $\mv(b,a,2)$; $\mv(c,d,4)$; $\mv(b,c,5)$; $\mv(a,c,4)$\\
+Sit.\ 3 $\to S_7$ ($a\prec b$) & $\mv(d,c,0)$; $\mv(a,b,5)$; $\mv(d,T,2)$; $\mv(a,c,0)$; $\mv(b,c,1)$; $\mv(d,T,3)$\\
+Sit.\ 3 $\to S_7$ ($b\prec a$) & $\mv(d,c,0)$; $\mv(a,b,5)$; $\mv(d,T,2)$; $\mv(a,d,3)$; $\mv(b,c,1)$; $\mv(a,c,0)$; $\mv(d,T,3)$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Execu\c{c}\~ao manual: Situa\c{c}\~ao 1, $S_0\to S_{f4}$}
+\begin{lstlisting}
+t=0   |.|.|.|d|d|d|   move(d,c,0): d sobre c, slots 0,1,2 livres;
+      |c|c|.|a|.|b|   apoio: c cobre 0,1 (2 >= ceil(3/2)=2)
+t=1   |d|d|d|.|.|.|   move(a,b,5): a sobre b (a tem topo livre)
+      |c|c|.|a|.|b|
+t=2   |d|d|d|.|.|a|   move(d,T,2): d na mesa, slots 2,3,4 livres
+      |c|c|.|.|.|b|
+t=3   |.|.|.|.|.|a|   move(a,c,0): a sobre c, apoio 1 >= 1
+      |c|c|d|d|d|b|
+t=4   |a|.|.|.|.|.|   meta Sf4 atingida
+      |c|c|d|d|d|b|
+\end{lstlisting}
+Por que $a$ n\~ao vai para a mesa: depois do passo 1 os slots 0,1 t\^em $c$, o slot 5 tem $b$, e restam os slots 2,3,4, exatamente os que $d$ ocupar\'a na meta. N\~ao h\'a lugar livre na mesa, ent\~ao $a$ espera em cima de $b$. Os passos manuais das demais situa\c{c}\~oes est\~ao no \texttt{README.md}.
+
+\section{Interpreta\c{c}\~ao da Sa\'ida do SAT Solver}
+\subsection{O miniSAT n\~ao conhece nomes simb\'olicos}
+O miniSAT \'e puramente booleano e devolve uma lista de inteiros (os IDs das vari\'aveis verdadeiras). A tradu\c{c}\~ao inteiro $\to$ s\'imbolo est\'a no arquivo \texttt{trab01\_blocos2SAT.map}, gerado por \texttt{bw2cnf\_var.py}.
+\subsection{Da sa\'ida num\'erica ao plano em portugu\^es}
+O \texttt{interpretar.py} (1) l\^e o mapa; (2) mant\'em os literais positivos que s\~ao a\c{c}\~oes $\mv$; (3) ordena por $t$ e traduz cada a\c{c}\~ao em uma frase; e reconstr\'oi os estados a partir de $\at$ e $\lev$.
+\subsection{Deriva\c{c}\~ao de $\on$}
+Se $l_b=0$: $\on(b,T,t)$. Se $l_b>0$: $b$ est\'a sobre todo $y$ com $\lev(y)=l_b-1$ cujo span sobrep\~oe o de $b$. Exemplos: $d$ est\'a sobre $a,b$ (ponte); $a$ est\'a sobre $c$.
+\subsection{Verifica\c{c}\~ao independente}
+Com \texttt{--verbose} o script desenha cada estado e confere as regras f\'isicas sem usar o CNF (sem sobreposi\c{c}\~ao, estabilidade, topo livre, s\'o o bloco movido muda). Todos os planos passaram.
+\subsection{Regra de ouro}
+Sem o arquivo \texttt{.map}, a sa\'ida do miniSAT \'e apenas uma lista de inteiros sem significado para o dom\'inio. Nunca interprete a sa\'ida sem o mapa correspondente.
+
+\end{document}
